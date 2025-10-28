@@ -1,4 +1,4 @@
-//AI_SPEC_BEGIN(def_operations): "implements all defined operations"
+//AI_SPEC_BEGIN(def_operations): "implements all defined operations from Operation"
 
 import { Operation } from "./operations";
 

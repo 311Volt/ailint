@@ -1,6 +1,6 @@
 {
   "name": "@x311volt/ailint",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI tool to validate AI specification rules in code",
   "module": "src/index.ts",
   "type": "module",
@@ -33,5 +33,9 @@
     "langchain": "^0.3.35",
     "mime-types": "^3.0.1",
     "openai": "^4.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/311Volt/ailint.git"
   }
 }
