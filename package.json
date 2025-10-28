@@ -1,0 +1,34 @@
+{
+  "name": "ai-spec",
+  "version": "1.0.0",
+  "description": "CLI tool to validate AI specification rules in code",
+  "module": "src/index.ts",
+  "type": "module",
+  "bin": {
+    "ai-spec": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "tsc",
+    "dev": "bun --watch src/index.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@langchain/openai": "^0.6.14",
+    "@types/mime-types": "^3.0.1",
+    "commander": "^14.0.1",
+    "dotenv": "^17.2.3",
+    "langchain": "^0.3.35",
+    "mime-types": "^3.0.1",
+    "openai": "^4.0.0"
+  }
+}
