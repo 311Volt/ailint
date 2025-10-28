@@ -1,0 +1,20 @@
+{
+	"baseConfig": "empty",
+	"includeExtensions": [
+		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+		".py", ".java", ".cpp", ".c", ".h", ".hpp",
+		".go", ".rs", ".php", ".rb", ".swift", ".kt",
+		".scala", ".clj", ".hs", ".ml", ".fs",
+		".sh", ".bash", ".zsh", ".fish", ".ps1",
+		".yaml", ".yml", ".toml", ".ini", ".cfg",
+		".json", ".xml", ".svg", ".md", ".rst",
+		".sql", ".graphql", ".gql"
+	],
+	"includeMimeTypes": [
+		"text/*"
+	],
+	"ignore": [
+		"/**/node_modules",
+		"/**/.git"
+	]
+}

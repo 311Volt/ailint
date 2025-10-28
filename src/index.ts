@@ -13,10 +13,10 @@ config({ path: ['.env', '.local.env'], override: true, quiet: true });
 const program = new Command();
 
 program
-  .name('ai-spec')
+  .name('ailint')
   .description('CLI tool to validate AI specification rules in code')
   .version('1.0.0')
-  .argument('[folder]', 'Folder path to scan', '.')
+  .argument('<folder>', 'Folder path to scan')
   .option('-b, --base-url <url>', 'OpenAI-compatible API base URL', process.env.AI_BASE_URL)
   .option('-k, --api-key <key>', 'AI API key', process.env.AI_API_KEY)
   .option('-m, --model <name>', 'AI model name', process.env.AI_MODEL_NAME || 'gemini-2.5-flash-lite')
@@ -24,6 +24,7 @@ program
   .option('-c, --chunk-size <size>', 'Maximum chunk size in characters', process.env.MAX_CHUNK_SIZE || '150000')
   .option('-o, --output-format <format>', 'Output format (pretty or json)', 'pretty')
   .option('-v, --verbose', 'Verbose output')
+  .option('--dry-run <mode>', 'Dry run mode (files or rules) - shows what would be processed without making AI calls')
   .action(async (folder: string, options) => {
     try {
       if (options.verbose) {
@@ -34,13 +35,6 @@ program
       // Initialize components
       const scanner = new DirectoryScanner();
       const parser = new AISpecBlockParser();
-      const aiService = new SendRulesToAI({
-        baseUrl: options.baseUrl,
-        apiKey: options.apiKey,
-        modelName: options.model,
-        temperature: parseFloat(options.temperature),
-        maxChunkSize: parseInt(options.chunkSize, 10),
-      });
 
       // Scan for text files
       if (options.verbose) {
@@ -54,6 +48,18 @@ program
 
       if (textFiles.length === 0) {
         console.log('No text files found to scan.');
+        return;
+      }
+
+      // Handle --dry-run=files mode
+      if (options.dryRun === 'files') {
+        console.log('Dry run mode: files');
+        console.log('===================\n');
+        console.log(`Found ${textFiles.length} files that would be scanned:\n`);
+        for (const file of textFiles) {
+          console.log(`  ${file}`);
+        }
+        console.log(`\nTotal: ${textFiles.length} files`);
         return;
       }
 
@@ -71,6 +77,38 @@ program
         console.log('No AI specification rules found in the scanned files.');
         return;
       }
+
+      // Handle --dry-run=rules mode
+      if (options.dryRun === 'rules') {
+        console.log('Dry run mode: rules');
+        console.log('===================\n');
+        
+        const aiService = new SendRulesToAI({
+          maxChunkSize: parseInt(options.chunkSize, 10),
+        });
+        
+        const xmlOutput = aiService.formatRulesToXML(rules);
+        
+        console.log('XML that would be sent to the AI model:\n');
+        console.log(xmlOutput);
+        console.log(`\nTotal rules: ${rules.length}`);
+        console.log(`XML length: ${xmlOutput.length} characters`);
+        return;
+      }
+
+      // Validate dry-run option if provided
+      if (options.dryRun) {
+        console.error(`Error: Invalid dry-run mode "${options.dryRun}". Must be "files" or "rules".`);
+        process.exit(1);
+      }
+
+      const aiService = new SendRulesToAI({
+        baseUrl: options.baseUrl,
+        apiKey: options.apiKey,
+        modelName: options.model,
+        temperature: parseFloat(options.temperature),
+        maxChunkSize: parseInt(options.chunkSize, 10),
+      });
 
       // Validate rules with AI
       if (options.verbose) {

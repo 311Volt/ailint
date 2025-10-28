@@ -1,14 +1,15 @@
 {
-  "name": "ai-spec",
+  "name": "@x311volt/ailint",
   "version": "1.0.0",
   "description": "CLI tool to validate AI specification rules in code",
   "module": "src/index.ts",
   "type": "module",
   "bin": {
-    "ai-spec": "./dist/index.js"
+    "ailint": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "static"
   ],
   "scripts": {
     "start": "bun run src/index.ts",
@@ -27,6 +28,8 @@
     "@types/mime-types": "^3.0.1",
     "commander": "^14.0.1",
     "dotenv": "^17.2.3",
+    "fast-xml-parser": "^5.3.0",
+    "ignore": "^7.0.5",
     "langchain": "^0.3.35",
     "mime-types": "^3.0.1",
     "openai": "^4.0.0"

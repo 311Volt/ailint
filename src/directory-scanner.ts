@@ -1,56 +1,146 @@
-import { readdir, stat } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { readdir, stat, access } from 'node:fs/promises';
+import { join, extname, relative, dirname } from 'node:path';
 import { lookup } from 'mime-types';
+import ignore from 'ignore';
+import { ConfigLoader } from './config-loader.js';
+import type { AilintConfig } from './interfaces/ailintconfig.js';
 
 export class DirectoryScanner {
-	async scanDirectory(dirPath: string): Promise<string[]> {
-		const textFiles: string[] = [];
-		await this._scanRecursive(dirPath, textFiles);
-		return textFiles;
-	}
+  private configLoader: ConfigLoader;
+  private configCache = new Map<string, AilintConfig | null>();
 
-	private async _scanRecursive(currentPath: string, textFiles: string[]): Promise<void> {
-		try {
-			const entries = await readdir(currentPath, { withFileTypes: true });
+  constructor() {
+    this.configLoader = new ConfigLoader();
+  }
 
-			for (const entry of entries) {
-				const fullPath = join(currentPath, entry.name);
+  async scanDirectory(dirPath: string): Promise<string[]> {
+    const textFiles: string[] = [];
+    await this._scanRecursive(dirPath, dirPath, textFiles);
+    return textFiles;
+  }
 
-				if (entry.isDirectory()) {
-					// Skip node_modules and .git directories for performance
-					if (entry.name !== 'node_modules' && entry.name !== '.git') {
-						await this._scanRecursive(fullPath, textFiles);
-					}
-				} else if (entry.isFile()) {
-					if (this._isTextFile(fullPath)) {
-						textFiles.push(fullPath);
-					}
-				}
-			}
-		} catch (error) {
-			console.warn(`Warning: Could not read directory ${currentPath}: ${error}`);
-		}
-	}
+  private async _scanRecursive(
+    rootPath: string,
+    currentPath: string,
+    textFiles: string[]
+  ): Promise<void> {
+    try {
+      // Load config for current directory
+      let config = await this.loadConfigForDirectory(currentPath);
+      
+      // If no config found, use default base config
+      if (!config) {
+        config = await this.configLoader.loadBaseConfig();
+      }
+      
+      // Create ignore instance
+      const ig = ignore();
+      if (config.ignore && config.ignore.length > 0) {
+        ig.add(config.ignore);
+      }
 
-	private _isTextFile(filePath: string): boolean {
-		const mimeType = lookup(filePath);
-		if (mimeType && mimeType.startsWith('text/')) {
-			return true;
-		}
+      const entries = await readdir(currentPath, { withFileTypes: true });
 
-		// Additional check for common source code extensions that mime-types may not recognize as text
-		const textExtensions = [
-			'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-			'.py', '.java', '.cpp', '.c', '.h', '.hpp',
-			'.go', '.rs', '.php', '.rb', '.swift', '.kt',
-			'.scala', '.clj', '.hs', '.ml', '.fs',
-			'.sh', '.bash', '.zsh', '.fish', '.ps1',
-			'.yaml', '.yml', '.toml', '.ini', '.cfg',
-			'.json', '.xml', '.svg', '.md', '.rst',
-			'.sql', '.graphql', '.gql'
-		];
+      for (const entry of entries) {
+        const fullPath = join(currentPath, entry.name);
+        const relativePath = relative(rootPath, fullPath);
 
-		const ext = extname(filePath).toLowerCase();
-		return textExtensions.includes(ext);
-	}
+        // Check if path should be ignored
+        if (this.shouldIgnore(ig, relativePath, entry.isDirectory())) {
+          continue;
+        }
+
+        if (entry.isDirectory()) {
+          await this._scanRecursive(rootPath, fullPath, textFiles);
+        } else if (entry.isFile()) {
+          if (this.isIncludedFile(fullPath, config)) {
+            textFiles.push(fullPath);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn(`Warning: Could not read directory ${currentPath}: ${error}`);
+    }
+  }
+
+  private async loadConfigForDirectory(dirPath: string): Promise<AilintConfig | null> {
+    // Check cache first
+    if (this.configCache.has(dirPath)) {
+      return this.configCache.get(dirPath)!;
+    }
+
+    // Look for ailintconfig.json in current directory
+    const configPath = join(dirPath, 'ailintconfig.json');
+    
+    try {
+      await access(configPath);
+      const config = await this.configLoader.loadConfig(configPath);
+      this.configCache.set(dirPath, config);
+      return config;
+    } catch {
+      // No config found, check parent directory
+      const parentDir = dirname(dirPath);
+      
+      // If we've reached the root, return null
+      if (parentDir === dirPath) {
+        this.configCache.set(dirPath, null);
+        return null;
+      }
+
+      // Recursively check parent
+      const parentConfig = await this.loadConfigForDirectory(parentDir);
+      this.configCache.set(dirPath, parentConfig);
+      return parentConfig;
+    }
+  }
+
+  private shouldIgnore(ig: ReturnType<typeof ignore>, path: string, isDirectory: boolean): boolean {
+    // Normalize path separators to forward slashes for ignore patterns
+    const normalizedPath = path.replace(/\\/g, '/');
+    
+    // For directories, append trailing slash
+    const checkPath = isDirectory ? `${normalizedPath}/` : normalizedPath;
+    
+    return ig.ignores(checkPath);
+  }
+
+  private isIncludedFile(filePath: string, config: AilintConfig): boolean {
+    const ext = extname(filePath).toLowerCase();
+    
+    // Check extension
+    if (config.includeExtensions && config.includeExtensions.length > 0) {
+      if (config.includeExtensions.includes(ext)) {
+        return true;
+      }
+    }
+
+    // Check mime type
+    if (config.includeMimeTypes && config.includeMimeTypes.length > 0) {
+      const mimeType = lookup(filePath);
+      if (mimeType) {
+        for (const pattern of config.includeMimeTypes) {
+          if (this.matchesMimePattern(mimeType, pattern)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private matchesMimePattern(mimeType: string, pattern: string): boolean {
+    // Handle wildcard patterns like "text/*"
+    if (pattern.endsWith('/*')) {
+      const prefix = pattern.slice(0, -2);
+      return mimeType.startsWith(prefix + '/');
+    }
+    
+    return mimeType === pattern;
+  }
+
+  clearCache(): void {
+    this.configCache.clear();
+    this.configLoader.clearCache();
+  }
 }
