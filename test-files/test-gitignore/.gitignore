@@ -1,0 +1,4 @@
+# Test .gitignore patterns
+*.log
+temp/
+ignored.ts

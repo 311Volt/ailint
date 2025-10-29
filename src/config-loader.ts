@@ -54,6 +54,7 @@ export class ConfigLoader {
         includeExtensions: config.includeExtensions || [],
         includeMimeTypes: config.includeMimeTypes || [],
         ignore: config.ignore || [],
+        useGitIgnore: config.useGitIgnore,
       };
     }
 
@@ -74,6 +75,7 @@ export class ConfigLoader {
         ...(baseConfig.ignore || []),
         ...(config.ignore || []),
       ],
+      useGitIgnore: config.useGitIgnore ?? baseConfig.useGitIgnore,
     };
   }
 

@@ -1,4 +1,4 @@
-import { readdir, stat, access } from 'node:fs/promises';
+import { readdir, stat, access, readFile } from 'node:fs/promises';
 import { join, extname, relative, dirname } from 'node:path';
 import { lookup } from 'mime-types';
 import ignore from 'ignore';
@@ -37,6 +37,14 @@ export class DirectoryScanner {
       const ig = ignore();
       if (config.ignore && config.ignore.length > 0) {
         ig.add(config.ignore);
+      }
+
+      // Load and add .gitignore patterns if enabled
+      if (config.useGitIgnore) {
+        const gitignorePatterns = await this.loadGitIgnorePatterns(currentPath, rootPath);
+        if (gitignorePatterns.length > 0) {
+          ig.add(gitignorePatterns);
+        }
       }
 
       const entries = await readdir(currentPath, { withFileTypes: true });
@@ -137,6 +145,58 @@ export class DirectoryScanner {
     }
     
     return mimeType === pattern;
+  }
+
+  private async loadGitIgnorePatterns(currentPath: string, rootPath: string): Promise<string[]> {
+    const patterns: string[] = [];
+    let dirPath = currentPath;
+
+    // Walk up the directory tree from currentPath to rootPath
+    while (true) {
+      const gitignorePath = join(dirPath, '.gitignore');
+      
+      try {
+        await access(gitignorePath);
+        const content = await readFile(gitignorePath, 'utf-8');
+        const lines = content.split('\n');
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          // Skip empty lines and comments
+          if (trimmed && !trimmed.startsWith('#')) {
+            // Calculate the relative path prefix for patterns in this .gitignore
+            const relativeToRoot = relative(rootPath, dirPath).replace(/\\/g, '/');
+            
+            if (relativeToRoot) {
+              // If the .gitignore is in a subdirectory, prefix the pattern
+              patterns.push(`${relativeToRoot}/${trimmed}`);
+            } else {
+              // If the .gitignore is at the root, use pattern as-is
+              patterns.push(trimmed);
+            }
+          }
+        }
+      } catch {
+        // .gitignore doesn't exist in this directory, continue
+      }
+
+      // Stop if we've reached the root path
+      if (dirPath === rootPath) {
+        break;
+      }
+
+      // Move to parent directory
+      const parentDir = dirname(dirPath);
+      
+      // Safety check: if parent is same as current, we've hit the filesystem root
+      if (parentDir === dirPath) {
+        break;
+      }
+
+      dirPath = parentDir;
+    }
+
+    return patterns;
   }
 
   clearCache(): void {

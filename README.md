@@ -70,7 +70,8 @@ This means you can have different configurations for different parts of your pro
   "baseConfig": "default",
   "includeExtensions": [".ts", ".js"],
   "includeMimeTypes": ["text/plain"],
-  "ignore": ["**/dist", "**/build"]
+  "ignore": ["**/dist", "**/build"],
+  "useGitIgnore": true
 }
 ```
 
@@ -93,6 +94,12 @@ This means you can have different configurations for different parts of your pro
   - Patterns are appended to base config if `baseConfig` is `"default"`
   - Supports all standard .gitignore syntax
   - Examples: `"**/node_modules"`, `"dist/"`, `"*.log"`
+
+- **`useGitIgnore`** (optional): Whether to automatically apply .gitignore patterns
+  - Default: `true` (enabled by default)
+  - When `true`, reads all .gitignore files from scan directory up to project root
+  - .gitignore patterns are combined with the `ignore` patterns
+  - Set to `false` to disable automatic .gitignore processing
 
 ### Default Configuration
 
@@ -127,7 +134,18 @@ text/*
 }
 ```
 
-This uses all default file types and ignore patterns.
+This uses all default file types and ignore patterns, including automatic .gitignore processing.
+
+#### Disable .gitignore Processing
+
+```json
+{
+  "baseConfig": "default",
+  "useGitIgnore": false
+}
+```
+
+Disables automatic .gitignore pattern processing, only using explicit `ignore` patterns.
 
 #### Custom Extensions Only
 

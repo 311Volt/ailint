@@ -3,4 +3,5 @@ export interface AilintConfig {
   includeExtensions?: string[];
   includeMimeTypes?: string[];
   ignore?: string[];
+  useGitIgnore?: boolean;
 }
