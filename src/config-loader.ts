@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AilintConfig } from './interfaces/ailintconfig.js';
+import { expand } from 'dotenv-expand';
+import { config } from 'dotenv';
+import type { AilintConfig, ApiConfig } from './interfaces/ailintconfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,12 +31,62 @@ export class ConfigLoader {
         throw new Error(`Invalid baseConfig value: ${config.baseConfig}. Must be 'empty' or 'default'.`);
       }
 
+      // Validate apiConfigRuleOverrides patterns
+      if (config.apiConfigRuleOverrides) {
+        this.validateRulePatterns(config.apiConfigRuleOverrides, configPath);
+      }
+
       const mergedConfig = await this.mergeWithBase(config);
       this.configCache.set(configPath, mergedConfig);
       return mergedConfig;
     } catch (error) {
       throw new Error(`Failed to load config from ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private validateRulePatterns(overrides: { [rulePattern: string]: Partial<ApiConfig> }, configPath: string): void {
+    const patterns = Object.keys(overrides);
+    const seen = new Set<string>();
+
+    for (const pattern of patterns) {
+      // Check for duplicates
+      if (seen.has(pattern)) {
+        throw new Error(
+          `Duplicate rule pattern "${pattern}" found in apiConfigRuleOverrides in ${configPath}`
+        );
+      }
+      seen.add(pattern);
+
+      // Validate pattern format
+      if (!this.isValidRulePattern(pattern)) {
+        throw new Error(
+          `Invalid rule pattern "${pattern}" in ${configPath}. ` +
+          `Pattern must be either an exact rule name or a prefix followed by a single asterisk (e.g., "prefix_*"). ` +
+          `Patterns like "prefix_*_suffix" are not allowed.`
+        );
+      }
+    }
+  }
+
+  private isValidRulePattern(pattern: string): boolean {
+    // Pattern is valid if:
+    // 1. It contains no asterisks (exact match)
+    // 2. It ends with a single asterisk and has a prefix (prefix_*)
+    
+    const asteriskCount = (pattern.match(/\*/g) || []).length;
+    
+    if (asteriskCount === 0) {
+      // Exact match pattern - valid
+      return true;
+    }
+    
+    if (asteriskCount === 1 && pattern.endsWith('*') && pattern.length > 1) {
+      // Prefix pattern - valid
+      return true;
+    }
+    
+    // Any other pattern is invalid
+    return false;
   }
 
   async loadBaseConfig(): Promise<AilintConfig> {
@@ -55,6 +107,8 @@ export class ConfigLoader {
         includeMimeTypes: config.includeMimeTypes || [],
         ignore: config.ignore || [],
         useGitIgnore: config.useGitIgnore,
+        apiConfig: config.apiConfig,
+        apiConfigRuleOverrides: config.apiConfigRuleOverrides,
       };
     }
 
@@ -76,7 +130,45 @@ export class ConfigLoader {
         ...(config.ignore || []),
       ],
       useGitIgnore: config.useGitIgnore ?? baseConfig.useGitIgnore,
+      apiConfig: config.apiConfig || baseConfig.apiConfig,
+      apiConfigRuleOverrides: config.apiConfigRuleOverrides || baseConfig.apiConfigRuleOverrides,
     };
+  }
+
+  private expandApiConfig(apiConfig: any): any {
+    if (!apiConfig) return apiConfig;
+
+    // Load environment variables
+    const envResult = config({ path: ['.env', '.local.env'], override: true, quiet: true });
+    const expanded = expand(envResult);
+
+    const expandedConfig: any = {};
+    for (const [key, value] of Object.entries(apiConfig)) {
+      if (typeof value === 'string' && value.includes('${')) {
+        // Simple template variable expansion
+        const expandedValue = value.replace(/\$\{([^}]+)\}/g, (match, varExpression) => {
+          // Handle default values: ${VAR:-default}
+          const [varName, ...defaultParts] = varExpression.split(':-');
+          const defaultValue = defaultParts.join(':-');
+          return expanded.parsed?.[varName] || process.env[varName] || defaultValue;
+        });
+        expandedConfig[key] = expandedValue;
+      } else {
+        expandedConfig[key] = value;
+      }
+    }
+
+    return expandedConfig;
+  }
+
+  async loadConfigWithExpandedApiConfig(configPath: string): Promise<AilintConfig> {
+    const config = await this.loadConfig(configPath);
+    
+    if (config.apiConfig) {
+      config.apiConfig = this.expandApiConfig(config.apiConfig);
+    }
+    
+    return config;
   }
 
   clearCache(): void {

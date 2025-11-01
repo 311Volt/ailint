@@ -102,12 +102,17 @@ program
         process.exit(1);
       }
 
+      // Load API config for the target directory
+      const apiConfig = await scanner.loadApiConfigForDirectory(resolve(folder));
+      
       const aiService = new SendRulesToAI({
+        apiConfig: apiConfig || undefined,
         baseUrl: options.baseUrl,
         apiKey: options.apiKey,
         modelName: options.model,
         temperature: parseFloat(options.temperature),
         maxChunkSize: parseInt(options.chunkSize, 10),
+        directoryScanner: scanner,
       });
 
       // Validate rules with AI

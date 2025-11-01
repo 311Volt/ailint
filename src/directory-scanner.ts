@@ -82,7 +82,7 @@ export class DirectoryScanner {
     
     try {
       await access(configPath);
-      const config = await this.configLoader.loadConfig(configPath);
+      const config = await this.configLoader.loadConfigWithExpandedApiConfig(configPath);
       this.configCache.set(dirPath, config);
       return config;
     } catch {
@@ -100,6 +100,174 @@ export class DirectoryScanner {
       this.configCache.set(dirPath, parentConfig);
       return parentConfig;
     }
+  }
+
+  async loadApiConfigForDirectory(dirPath: string): Promise<AilintConfig['apiConfig'] | null> {
+    const config = await this.loadConfigForDirectory(dirPath);
+    
+    if (!config) {
+      // If no config found, load and expand base config
+      const baseConfig = await this.configLoader.loadBaseConfig();
+      const expandedBaseConfig = await this.configLoader.loadConfigWithExpandedApiConfig(
+        join(__dirname, '..', 'static', 'ailintconfig.base.json')
+      );
+      return expandedBaseConfig.apiConfig || null;
+    }
+    
+    return config.apiConfig || null;
+  }
+
+  async loadFullConfigForDirectory(dirPath: string): Promise<AilintConfig | null> {
+    const config = await this.loadConfigForDirectory(dirPath);
+    
+    if (!config) {
+      // If no config found, load and expand base config
+      const expandedBaseConfig = await this.configLoader.loadConfigWithExpandedApiConfig(
+        join(__dirname, '..', 'static', 'ailintconfig.base.json')
+      );
+      return expandedBaseConfig;
+    }
+    
+    return config;
+  }
+
+  async resolveApiConfigForFile(filePath: string, ruleName: string): Promise<AilintConfig['apiConfig'] | null> {
+    const dirPath = dirname(filePath);
+    
+    // Collect all configs from this directory up to root, with their paths
+    const configsWithPaths = await this.collectConfigsWithPaths(dirPath);
+    
+    if (configsWithPaths.length === 0) {
+      return null;
+    }
+
+    // Find the best matching override across all configs
+    const bestMatch = this.findBestMatchingOverride(ruleName, configsWithPaths);
+    
+    if (bestMatch) {
+      const { override, baseConfig } = bestMatch;
+      
+      if (!baseConfig) {
+        throw new Error(`Rule override specified for "${ruleName}" but no base apiConfig found in configuration`);
+      }
+
+      // Merge override with base config
+      return {
+        baseUrl: override.baseUrl ?? baseConfig.baseUrl,
+        modelName: override.modelName ?? baseConfig.modelName,
+        apiKey: override.apiKey ?? baseConfig.apiKey,
+        temperature: override.temperature ?? baseConfig.temperature,
+      };
+    }
+
+    // No override found, return the base config from the most specific directory
+    return configsWithPaths[configsWithPaths.length - 1]!.config.apiConfig || null;
+  }
+
+  private async collectConfigsWithPaths(startPath: string): Promise<Array<{ config: AilintConfig; configPath: string; depth: number }>> {
+    const configs: Array<{ config: AilintConfig; configPath: string; depth: number }> = [];
+    let currentPath = startPath;
+    let depth = 0;
+
+    while (true) {
+      const configPath = join(currentPath, 'ailintconfig.json');
+      
+      try {
+        await access(configPath);
+        const config = await this.configLoader.loadConfigWithExpandedApiConfig(configPath);
+        configs.push({ config, configPath, depth });
+      } catch {
+        // No config in this directory
+      }
+
+      // Move to parent directory
+      const parentDir = dirname(currentPath);
+      
+      // If we've hit the root, stop
+      if (parentDir === currentPath) {
+        break;
+      }
+
+      currentPath = parentDir;
+      depth++;
+    }
+
+    return configs;
+  }
+
+  private findBestMatchingOverride(
+    ruleName: string,
+    configsWithPaths: Array<{ config: AilintConfig; configPath: string; depth: number }>
+  ): { override: Partial<AilintConfig['apiConfig']>; baseConfig: AilintConfig['apiConfig'] } | null {
+    interface Match {
+      override: Partial<AilintConfig['apiConfig']>;
+      baseConfig: AilintConfig['apiConfig'];
+      pattern: string;
+      isExact: boolean;
+      prefixLength: number;
+      depth: number;
+    }
+
+    const matches: Match[] = [];
+
+    // Collect all matching patterns from all configs
+    for (const { config, configPath, depth } of configsWithPaths) {
+      if (!config.apiConfigRuleOverrides) {
+        continue;
+      }
+
+      for (const [pattern, override] of Object.entries(config.apiConfigRuleOverrides)) {
+        if (this.patternMatches(pattern, ruleName)) {
+          const isExact = !pattern.includes('*');
+          const prefixLength = isExact ? ruleName.length : pattern.length - 1; // -1 for the asterisk
+
+          matches.push({
+            override,
+            baseConfig: config.apiConfig || null,
+            pattern,
+            isExact,
+            prefixLength,
+            depth,
+          });
+        }
+      }
+    }
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    // Sort matches by priority:
+    // 1. Exact matches first (isExact = true)
+    // 2. Then by longest prefix
+    // 3. Then by most nested directory (smallest depth)
+    matches.sort((a, b) => {
+      // Priority 1: Exact match wins
+      if (a.isExact !== b.isExact) {
+        return a.isExact ? -1 : 1;
+      }
+      
+      // Priority 2: Longest prefix wins
+      if (a.prefixLength !== b.prefixLength) {
+        return b.prefixLength - a.prefixLength;
+      }
+      
+      // Priority 3: Most nested directory wins (smaller depth = more nested)
+      return a.depth - b.depth;
+    });
+
+    return matches[0]!;
+  }
+
+  private patternMatches(pattern: string, ruleName: string): boolean {
+    if (!pattern.includes('*')) {
+      // Exact match
+      return pattern === ruleName;
+    }
+
+    // Prefix match (pattern ends with *)
+    const prefix = pattern.slice(0, -1); // Remove the asterisk
+    return ruleName.startsWith(prefix);
   }
 
   private shouldIgnore(ig: ReturnType<typeof ignore>, path: string, isDirectory: boolean): boolean {
