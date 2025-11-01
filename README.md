@@ -93,6 +93,21 @@ As of November 2025, for a free option, use [Gemini's free tier](https://aistudi
 A general recommendation is to use a fast, cheap model as a global default, and to use granular per-directory and per-rule overrides (documented below) for isolated cases where a smarter model is required to perform a rule check properly.
 
 
+## CLI
+
+```bash
+ailint <folder> [options]
+```
+
+### Options
+
+- `-c, --chunk-size <size>` - Max chunk size in characters (default: `150000`, env: `MAX_CHUNK_SIZE`)
+- `-o, --output-format <format>` - Output format: `pretty` or `json` (default: `pretty`)
+- `-v, --verbose` - Verbose output
+- `--dry-run <mode>` - Dry run mode: `files` or `rules`
+
+
+
 
 ## Integration
 
@@ -542,17 +557,3 @@ This is useful for:
 - Debugging configuration issues
 - Verifying ignore patterns work correctly
 - Estimating token usage (rule of thumb: 1 token = approx. 3-4 chars)
-
-## CLI Options
-
-```bash
-ailint <folder> [options]
-```
-
-### Options
-
-- `-c, --chunk-size <size>` - Max chunk size in characters (default: `150000`, env: `MAX_CHUNK_SIZE`)
-- `-o, --output-format <format>` - Output format: `pretty` or `json` (default: `pretty`)
-- `-v, --verbose` - Verbose output
-- `--dry-run <mode>` - Dry run mode: `files` or `rules`
-
