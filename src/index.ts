@@ -17,10 +17,6 @@ program
   .description('CLI tool to validate AI specification rules in code')
   .version('1.0.0')
   .argument('<folder>', 'Folder path to scan')
-  .option('-b, --base-url <url>', 'OpenAI-compatible API base URL', process.env.AI_BASE_URL)
-  .option('-k, --api-key <key>', 'AI API key', process.env.AI_API_KEY)
-  .option('-m, --model <name>', 'AI model name', process.env.AI_MODEL_NAME || 'gemini-2.5-flash-lite')
-  .option('-t, --temperature <temp>', 'AI temperature', process.env.AI_TEMPERATURE || '0.1')
   .option('-c, --chunk-size <size>', 'Maximum chunk size in characters', process.env.MAX_CHUNK_SIZE || '150000')
   .option('-o, --output-format <format>', 'Output format (pretty or json)', 'pretty')
   .option('-v, --verbose', 'Verbose output')
@@ -107,10 +103,6 @@ program
       
       const aiService = new SendRulesToAI({
         apiConfig: apiConfig || undefined,
-        baseUrl: options.baseUrl,
-        apiKey: options.apiKey,
-        modelName: options.model,
-        temperature: parseFloat(options.temperature),
         maxChunkSize: parseInt(options.chunkSize, 10),
         directoryScanner: scanner,
       });

@@ -7,17 +7,13 @@ import type { ApiConfig } from "./interfaces/ailintconfig.js";
 const mockCreate = mock(() => Promise.resolve({
   choices: [{
     message: {
-      tool_calls: [{
-        function: {
-          name: "return_validation_results",
-          arguments: JSON.stringify({
-            results: {
-              test_rule: { result: "PASS" }
-            }
-          })
-        }
-      }]
-    }
+      role: "assistant",
+      content: JSON.stringify({
+        test_rule: { result: "PASS", reason: null }
+      }),
+      refusal: null
+    },
+    finish_reason: "stop"
   }]
 }));
 
@@ -184,17 +180,13 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: {
-                    test_rule: { result: "PASS" }
-                  }
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify({
+              test_rule: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -202,6 +194,7 @@ describe("SendRulesToAI", () => {
 
       expect(results.test_rule).toBeDefined();
       expect(results.test_rule!.result).toBe("PASS");
+      expect(results.test_rule!.reason).toBeNull();
       expect(mockCreate).toHaveBeenCalled();
     });
 
@@ -220,20 +213,16 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: {
-                    failing_rule: {
-                      result: "FAIL",
-                      reason: "Function returns 43, not 42 as specified"
-                    }
-                  }
-                })
+            role: "assistant",
+            content: JSON.stringify({
+              failing_rule: {
+                result: "FAIL",
+                reason: "Function returns 43, not 42 as specified"
               }
-            }]
-          }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -259,15 +248,13 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: { test_rule: { result: "PASS" } }
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify({
+              test_rule: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -282,6 +269,9 @@ describe("SendRulesToAI", () => {
       const callArgs = (mockCreate.mock.calls as any)[0][0] as any;
       expect(callArgs.model).toBe("test-model");
       expect(callArgs.temperature).toBe(0.0);
+      expect(callArgs.response_format).toBeDefined();
+      expect(callArgs.response_format.type).toBe("json_schema");
+      expect(callArgs.response_format.json_schema.strict).toBe(true);
     });
 
     test("excludes temperature parameter for gpt-5 models", async () => {
@@ -307,15 +297,13 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: { test_rule: { result: "PASS" } }
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify({
+              test_rule: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -325,6 +313,57 @@ describe("SendRulesToAI", () => {
       const callArgs = (mockCreate.mock.calls as any)[0][0] as any;
       expect(callArgs.model).toBe("gpt-5-mini");
       expect(callArgs.temperature).toBeUndefined();
+    });
+
+    test("creates dynamic schema based on rule names", async () => {
+      const rules: AISpecRule[] = [
+        {
+          name: "rule_one",
+          blocks: [{
+            specification: "test1",
+            source: "code1",
+            filePath: "/test1.ts",
+            startLine: 1,
+            endLine: 2,
+          }]
+        },
+        {
+          name: "rule_two",
+          blocks: [{
+            specification: "test2",
+            source: "code2",
+            filePath: "/test2.ts",
+            startLine: 1,
+            endLine: 2,
+          }]
+        }
+      ];
+
+      mockCreate.mockResolvedValue({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              rule_one: { result: "PASS", reason: null },
+              rule_two: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
+        }]
+      });
+
+      await service.validateRules(rules);
+
+      expect(mockCreate).toHaveBeenCalled();
+      const callArgs = (mockCreate.mock.calls as any)[0][0] as any;
+      const schema = callArgs.response_format.json_schema.schema;
+      
+      expect(schema.properties.rule_one).toBeDefined();
+      expect(schema.properties.rule_two).toBeDefined();
+      expect(schema.required).toContain("rule_one");
+      expect(schema.required).toContain("rule_two");
+      expect(schema.additionalProperties).toBe(false);
     });
   });
 
@@ -361,18 +400,14 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: {
-                    rule1: { result: "PASS" },
-                    rule2: { result: "PASS" }
-                  }
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify({
+              rule1: { result: "PASS", reason: null },
+              rule2: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -417,18 +452,14 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: {
-                    rule1: { result: "PASS" },
-                    rule2: { result: "PASS" }
-                  }
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify({
+              rule1: { result: "PASS", reason: null },
+              rule2: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -461,17 +492,15 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: Object.fromEntries(
-                    rules.map(r => [r.name, { result: "PASS" }])
-                  )
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify(
+              Object.fromEntries(
+                rules.map(r => [r.name, { result: "PASS", reason: null }])
+              )
+            ),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -515,15 +544,13 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "return_validation_results",
-                arguments: JSON.stringify({
-                  results: { test_rule: { result: "PASS" } }
-                })
-              }
-            }]
-          }
+            role: "assistant",
+            content: JSON.stringify({
+              test_rule: { result: "PASS", reason: null }
+            }),
+            refusal: null
+          },
+          finish_reason: "stop"
         }]
       });
 
@@ -591,7 +618,7 @@ describe("SendRulesToAI", () => {
   });
 
   describe("error handling", () => {
-    test("throws error when AI doesn't call the tool", async () => {
+    test("throws error when AI response has no message", async () => {
       const rules: AISpecRule[] = [{
         name: "test_rule",
         blocks: [{
@@ -604,19 +631,15 @@ describe("SendRulesToAI", () => {
       }];
 
       mockCreate.mockResolvedValue({
-        choices: [{
-          message: {
-            tool_calls: []
-          }
-        }]
+        choices: []
       });
 
       await expect(service.validateRules(rules)).rejects.toThrow(
-        "No tool call found"
+        "No message in AI response"
       );
     });
 
-    test("throws error when AI calls wrong tool", async () => {
+    test("throws error when AI refuses the request", async () => {
       const rules: AISpecRule[] = [{
         name: "test_rule",
         blocks: [{
@@ -631,18 +654,72 @@ describe("SendRulesToAI", () => {
       mockCreate.mockResolvedValue({
         choices: [{
           message: {
-            tool_calls: [{
-              function: {
-                name: "wrong_tool",
-                arguments: "{}"
-              }
-            }]
-          }
+            role: "assistant",
+            content: null,
+            refusal: "I cannot assist with that request."
+          },
+          finish_reason: "stop"
         }]
       });
 
       await expect(service.validateRules(rules)).rejects.toThrow(
-        "unexpected tool called"
+        "AI refused the request"
+      );
+    });
+
+    test("throws error when AI response has no content", async () => {
+      const rules: AISpecRule[] = [{
+        name: "test_rule",
+        blocks: [{
+          specification: "test",
+          source: "code",
+          filePath: "/test.ts",
+          startLine: 1,
+          endLine: 2,
+        }]
+      }];
+
+      mockCreate.mockResolvedValue({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: null,
+            refusal: null
+          },
+          finish_reason: "stop"
+        }]
+      });
+
+      await expect(service.validateRules(rules)).rejects.toThrow(
+        "No content in AI response"
+      );
+    });
+
+    test("throws error when content is not valid JSON", async () => {
+      const rules: AISpecRule[] = [{
+        name: "test_rule",
+        blocks: [{
+          specification: "test",
+          source: "code",
+          filePath: "/test.ts",
+          startLine: 1,
+          endLine: 2,
+        }]
+      }];
+
+      mockCreate.mockResolvedValue({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "not valid json {",
+            refusal: null
+          },
+          finish_reason: "stop"
+        }]
+      });
+
+      await expect(service.validateRules(rules)).rejects.toThrow(
+        "Failed to parse AI response as JSON"
       );
     });
   });

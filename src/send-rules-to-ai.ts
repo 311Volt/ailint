@@ -3,15 +3,10 @@ import { z } from 'zod';
 import { XMLBuilder } from 'fast-xml-parser';
 import type { AISpecRule, AISpecValidationResult } from './interfaces/ai-spec-rule.js';
 import type { ApiConfig } from './interfaces/ailintconfig.js';
-import type { ChatCompletionTool } from 'openai/resources.mjs';
 import type { DirectoryScanner } from './directory-scanner.js';
 
 export interface AIServiceConfig {
   apiConfig?: ApiConfig;
-  baseUrl?: string;
-  apiKey?: string;
-  modelName?: string;
-  temperature?: number;
   maxChunkSize?: number;
   onProgress?: (current: number, total: number) => void;
   directoryScanner?: DirectoryScanner;
@@ -40,17 +35,16 @@ Each AISpecRule contains:
 
 Your task is to check whether the source code in each block matches its specification, in the context of the entire rule.
 
-For each rule:
-- If ALL blocks' source code correctly implements their specifications, return "PASS"
-- If ANY block's source code does not match its specification, return "FAIL" with a concise reason (max 3 sentences)
+For each rule, you must return a result with:
+- result: Either "PASS" if ALL blocks' source code correctly implements their specifications, or "FAIL" if ANY block's source code does not match its specification
+- reason: If result is "FAIL", provide a concise explanation (max 3 sentences). If result is "PASS", set reason to null.
 
 Consider the entire rule context when evaluating individual blocks.
 
-You MUST use the 'return_validation_results' tool to respond with the validation results.`;
+You must return a JSON object with results for each rule name specified in the schema.`;
   }
 
   async validateRules(rules: AISpecRule[], onProgress?: (current: number, total: number) => void): Promise<AISpecValidationResult> {
-    console.log('[DEBUG] validateRules called with', rules.length, 'rules');
     const results: AISpecValidationResult = {};
 
     // First, validate that all blocks in each rule use the same API config
@@ -58,30 +52,24 @@ You MUST use the 'return_validation_results' tool to respond with the validation
 
     // Group rules by their resolved API configuration
     const rulesByConfig = await this.groupRulesByApiConfig(rules);
-    console.log('[DEBUG] Rules grouped into', rulesByConfig.size, 'config groups');
 
     let processedRules = 0;
     const totalRules = rules.length;
 
     // Process each group with its corresponding API config
     for (const [configKey, configRules] of rulesByConfig.entries()) {
-      console.log('[DEBUG] Processing config group:', configKey, 'with', configRules.length, 'rules');
       const apiConfig = this.parseConfigKey(configKey);
       
       // Split rules into chunks based on character limit
       const chunks = this.chunkRules(configRules);
-      console.log('[DEBUG] Split into', chunks.length, 'chunks');
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i]!;
-        console.log('[DEBUG] Processing chunk', i + 1, 'of', chunks.length, 'with', chunk.length, 'rules');
 
         const chunkResults = await this.processChunk(chunk, apiConfig);
-        console.log('[DEBUG] Chunk results:', chunkResults);
         Object.assign(results, chunkResults);
 
         processedRules += chunk.length;
-        console.log('[DEBUG] Processed', processedRules, 'of', totalRules, 'rules');
         
         // Report progress if callback provided
         if (onProgress) {
@@ -90,7 +78,6 @@ You MUST use the 'return_validation_results' tool to respond with the validation
       }
     }
 
-    console.log('[DEBUG] Final validation results:', results);
     return results;
   }
 
@@ -125,15 +112,47 @@ You MUST use the 'return_validation_results' tool to respond with the validation
     return `<?xml version="1.0" encoding="UTF-8"?>\n${xmlContent}`;
   }
 
+  /**
+   * Creates a JSON Schema dynamically based on the rule names in the chunk
+   */
+  private createResponseSchema(rules: AISpecRule[]): any {
+    const properties: any = {};
+    const required: string[] = [];
+
+    for (const rule of rules) {
+      properties[rule.name] = {
+        type: "object",
+        properties: {
+          result: {
+            type: "string",
+            enum: ["PASS", "FAIL"]
+          },
+          reason: {
+            type: ["string", "null"],
+            description: "Explanation if result is FAIL, null if PASS"
+          }
+        },
+        required: ["result", "reason"],
+        additionalProperties: false
+      };
+      required.push(rule.name);
+    }
+
+    return {
+      type: "object",
+      properties,
+      required,
+      additionalProperties: false
+    };
+  }
+
   private async validateRuleConfigurations(rules: AISpecRule[]): Promise<void> {
     if (!this.directoryScanner) {
-      console.log('[DEBUG] No directory scanner provided, skipping configuration validation');
       // If no directory scanner provided, skip validation
       return;
     }
 
     for (const rule of rules) {
-      console.log('[DEBUG] Validating configuration for rule:', rule.name);
       const configs = new Map<string, ApiConfig | null>();
       const blockPaths: string[] = [];
 
@@ -244,13 +263,6 @@ You MUST use the 'return_validation_results' tool to respond with the validation
   }
 
   private async processChunk(rules: AISpecRule[], apiConfig: ApiConfig): Promise<AISpecValidationResult> {
-    console.log('[DEBUG] Starting processChunk with rules:', rules.map(r => r.name));
-    console.log('[DEBUG] API config:', {
-      baseUrl: apiConfig.baseUrl,
-      modelName: apiConfig.modelName,
-      temperature: apiConfig.temperature,
-      hasApiKey: !!apiConfig.apiKey
-    });
 
     // Create OpenAI client with the provided config
     const openai = new OpenAI({
@@ -263,54 +275,29 @@ You MUST use the 'return_validation_results' tool to respond with the validation
     // Special case: if model name contains "gpt-5", don't include temperature
     const temperature = modelName.includes('gpt-5') ? undefined : temperatureValue;
 
-    console.log('[DEBUG] Model name:', modelName);
-    console.log('[DEBUG] Temperature:', temperature);
 
-    const outputSchema = z.record(z.string(), z.object({
+    // Create dynamic schema based on rules
+    const responseSchema = this.createResponseSchema(rules);
+
+    // Create Zod schema for validation
+    const ruleResultSchema = z.object({
       result: z.enum(['PASS', 'FAIL']),
-      reason: z.string().optional()
-    }));
-
-    const toolSchema: ChatCompletionTool = {
-      type: 'function',
-      function: {
-        name: 'return_validation_results',
-        description: 'Returns the validation results for the given AISpecRules.',
-        parameters: {
-          type: 'object',
-          properties: {
-            results: {
-              type: 'object',
-              description: 'An object where keys are rule names and values are objects with "result" (either "PASS" or "FAIL") and an optional "reason" string.',
-              additionalProperties: {
-                type: 'object',
-                properties: {
-                  result: {
-                    type: 'string',
-                    enum: ['PASS', 'FAIL'],
-                  },
-                  reason: {
-                    type: 'string',
-                  },
-                },
-                required: ['result'],
-              },
-            },
-          },
-          required: ['results'],
-        },
-      },
-    };
+      reason: z.string().nullable()
+    });
+    
+    const outputSchemaProperties: Record<string, z.ZodObject<any>> = {};
+    for (const rule of rules) {
+      outputSchemaProperties[rule.name] = ruleResultSchema;
+    }
+    
+    const outputSchema = z.object(outputSchemaProperties);
 
     const xmlContent = this.formatRulesToXML(rules);
-    console.log('[DEBUG] Generated XML content length:', xmlContent.length);
-    console.log('[DEBUG] XML content preview:', xmlContent.substring(0, 500) + '...');
 
-    const humanPrompt = `Analyze these AISpecRules and return validation results using the 'return_validation_results' tool.
+    const humanPrompt = `Analyze these AISpecRules and return validation results.
 
 ${xmlContent}`;
 
-    console.log('[DEBUG] Human prompt length:', humanPrompt.length);
 
     const completionParams: any = {
       model: modelName,
@@ -318,11 +305,14 @@ ${xmlContent}`;
         { role: 'system', content: this.systemPrompt },
         { role: 'user', content: humanPrompt },
       ],
-      tools: [toolSchema],
-      tool_choice: {
-        type: 'function',
-        function: { name: 'return_validation_results' },
-      },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'validation_results',
+          strict: true,
+          schema: responseSchema
+        }
+      }
     };
 
     // Only include temperature if it's defined (not undefined for GPT-5 models)
@@ -330,74 +320,38 @@ ${xmlContent}`;
       completionParams.temperature = temperature;
     }
 
-    console.log('[DEBUG] Completion params:', JSON.stringify(completionParams, null, 2));
 
-    console.log('[DEBUG] Calling OpenAI API...');
     const completion = await openai.chat.completions.create(completionParams);
-    console.log('[DEBUG] Received completion response');
 
-    console.log('[DEBUG] Completion choices length:', completion.choices.length);
-    console.log('[DEBUG] First choice:', {
-      finishReason: completion.choices[0]?.finish_reason,
-      message: completion.choices[0]?.message ? {
-        role: completion.choices[0].message.role,
-        content: completion.choices[0].message.content,
-        toolCalls: completion.choices[0].message.tool_calls?.map(tc => ({
-          id: tc.id,
-          type: tc.type,
-          functionName: tc.function.name,
-          functionArgs: tc.function.arguments
-        }))
-      } : null
-    });
 
-    const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+    const message = completion.choices[0]?.message;
 
-    if (!toolCall) {
-      console.log('[DEBUG] No tool call found in completion');
-      throw new Error("No tool call found or unexpected tool called from AI.");
+    if (!message) {
+      throw new Error("No message in AI response.");
     }
 
-    console.log('[DEBUG] Tool call details:', {
-      id: toolCall.id,
-      type: toolCall.type,
-      functionName: toolCall.function.name,
-      functionArgs: toolCall.function.arguments
-    });
-
-    if (toolCall.function.name !== 'return_validation_results') {
-      console.log('[DEBUG] Unexpected tool function name:', toolCall.function.name);
-      throw new Error("No tool call found or unexpected tool called from AI.");
+    // Check for refusal
+    if (message.refusal) {
+      throw new Error(`AI refused the request: ${message.refusal}`);
     }
 
-    const rawResponse = toolCall.function.arguments;
-    console.log('[DEBUG] Raw response from AI:', rawResponse);
+    const content = message.content;
     
-    if (!rawResponse) {
-      console.log('[DEBUG] No response content from AI');
-      throw new Error("No response content from AI.");
+    if (!content) {
+      throw new Error("No content in AI response.");
     }
 
     let parsedResponse;
     try {
-      parsedResponse = JSON.parse(rawResponse);
-      console.log('[DEBUG] Parsed JSON response:', JSON.stringify(parsedResponse, null, 2));
+      parsedResponse = JSON.parse(content);
     } catch (error) {
-      console.log('[DEBUG] Failed to parse JSON response:', error);
       throw new Error(`Failed to parse AI response as JSON: ${error}`);
     }
 
-    console.log('[DEBUG] Results object from parsed response:', parsedResponse.results);
-    console.log('[DEBUG] Results object type:', typeof parsedResponse.results);
-    console.log('[DEBUG] Results object keys:', parsedResponse.results ? Object.keys(parsedResponse.results) : 'undefined');
-
     let validationResult;
     try {
-      validationResult = outputSchema.parse(parsedResponse.results) as AISpecValidationResult;
-      console.log('[DEBUG] Schema validation successful:', validationResult);
+      validationResult = outputSchema.parse(parsedResponse) as AISpecValidationResult;
     } catch (error) {
-      console.log('[DEBUG] Schema validation failed:', error);
-      console.log('[DEBUG] Error details:', JSON.stringify(error, null, 2));
       throw error;
     }
 
