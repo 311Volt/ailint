@@ -16,7 +16,8 @@ export class DirectoryScanner {
   async scanDirectory(dirPath: string): Promise<string[]> {
     const textFiles: string[] = [];
     await this._scanRecursive(dirPath, dirPath, textFiles);
-    return textFiles;
+    // Normalize path separators to forward slashes for consistency across platforms
+    return textFiles.map(path => path.replace(/\\/g, '/'));
   }
 
   private async _scanRecursive(

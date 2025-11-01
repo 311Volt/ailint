@@ -20,7 +20,7 @@
 	"useGitIgnore": true,
 	"apiConfig": {
 		"baseUrl": "${OPENAI_BASE_URL:-https://api.openai.com/v1}",
-		"modelName": "${OPENAI_MODEL:-gpt-5-nano}",
+		"modelName": "${OPENAI_MODEL:-gpt-5}",
 		"apiKey": "${OPENAI_API_KEY:-}",
 		"temperature": "${OPENAI_TEMPERATURE:-0.0}"
 	}

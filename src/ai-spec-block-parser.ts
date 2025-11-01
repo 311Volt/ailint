@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import type { AISpecRule, AISpecBlock } from './interfaces/ai-spec-rule.js';
 
 export class AISpecBlockParser {
-  private readonly beginRegex = /\/\/\s*AI_SPEC_BEGIN\(([^)]+)\):\s*"([^"]*)"/;
-  private readonly endRegex = /\/\/\s*AI_SPEC_END\(([^)]+)\)/;
+  private readonly beginRegex = /AI_SPEC_BEGIN\(([^)]+)\):\s*"([^"]*)"/;
+  private readonly endRegex = /AI_SPEC_END\(([^)]+)\)/;
 
   async parseFile(filePath: string): Promise<AISpecRule[]> {
     const content = await readFile(filePath, 'utf-8');
@@ -70,7 +70,8 @@ export class AISpecBlockParser {
       }
     }
     
-    return Array.from(rules.values());
+    // Filter out rules with no blocks (incomplete/invalid)
+    return Array.from(rules.values()).filter(rule => rule.blocks.length > 0);
   }
 
   async parseFiles(filePaths: string[]): Promise<AISpecRule[]> {

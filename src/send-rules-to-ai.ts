@@ -50,6 +50,7 @@ You MUST use the 'return_validation_results' tool to respond with the validation
   }
 
   async validateRules(rules: AISpecRule[], onProgress?: (current: number, total: number) => void): Promise<AISpecValidationResult> {
+    console.log('[DEBUG] validateRules called with', rules.length, 'rules');
     const results: AISpecValidationResult = {};
 
     // First, validate that all blocks in each rule use the same API config
@@ -57,24 +58,30 @@ You MUST use the 'return_validation_results' tool to respond with the validation
 
     // Group rules by their resolved API configuration
     const rulesByConfig = await this.groupRulesByApiConfig(rules);
+    console.log('[DEBUG] Rules grouped into', rulesByConfig.size, 'config groups');
 
     let processedRules = 0;
     const totalRules = rules.length;
 
     // Process each group with its corresponding API config
     for (const [configKey, configRules] of rulesByConfig.entries()) {
+      console.log('[DEBUG] Processing config group:', configKey, 'with', configRules.length, 'rules');
       const apiConfig = this.parseConfigKey(configKey);
       
       // Split rules into chunks based on character limit
       const chunks = this.chunkRules(configRules);
+      console.log('[DEBUG] Split into', chunks.length, 'chunks');
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i]!;
+        console.log('[DEBUG] Processing chunk', i + 1, 'of', chunks.length, 'with', chunk.length, 'rules');
 
         const chunkResults = await this.processChunk(chunk, apiConfig);
+        console.log('[DEBUG] Chunk results:', chunkResults);
         Object.assign(results, chunkResults);
 
         processedRules += chunk.length;
+        console.log('[DEBUG] Processed', processedRules, 'of', totalRules, 'rules');
         
         // Report progress if callback provided
         if (onProgress) {
@@ -83,6 +90,7 @@ You MUST use the 'return_validation_results' tool to respond with the validation
       }
     }
 
+    console.log('[DEBUG] Final validation results:', results);
     return results;
   }
 
@@ -119,11 +127,13 @@ You MUST use the 'return_validation_results' tool to respond with the validation
 
   private async validateRuleConfigurations(rules: AISpecRule[]): Promise<void> {
     if (!this.directoryScanner) {
+      console.log('[DEBUG] No directory scanner provided, skipping configuration validation');
       // If no directory scanner provided, skip validation
       return;
     }
 
     for (const rule of rules) {
+      console.log('[DEBUG] Validating configuration for rule:', rule.name);
       const configs = new Map<string, ApiConfig | null>();
       const blockPaths: string[] = [];
 
@@ -234,6 +244,14 @@ You MUST use the 'return_validation_results' tool to respond with the validation
   }
 
   private async processChunk(rules: AISpecRule[], apiConfig: ApiConfig): Promise<AISpecValidationResult> {
+    console.log('[DEBUG] Starting processChunk with rules:', rules.map(r => r.name));
+    console.log('[DEBUG] API config:', {
+      baseUrl: apiConfig.baseUrl,
+      modelName: apiConfig.modelName,
+      temperature: apiConfig.temperature,
+      hasApiKey: !!apiConfig.apiKey
+    });
+
     // Create OpenAI client with the provided config
     const openai = new OpenAI({
       apiKey: apiConfig.apiKey,
@@ -244,6 +262,9 @@ You MUST use the 'return_validation_results' tool to respond with the validation
     const temperatureValue = parseFloat(apiConfig.temperature);
     // Special case: if model name contains "gpt-5", don't include temperature
     const temperature = modelName.includes('gpt-5') ? undefined : temperatureValue;
+
+    console.log('[DEBUG] Model name:', modelName);
+    console.log('[DEBUG] Temperature:', temperature);
 
     const outputSchema = z.record(z.string(), z.object({
       result: z.enum(['PASS', 'FAIL']),
@@ -282,9 +303,14 @@ You MUST use the 'return_validation_results' tool to respond with the validation
     };
 
     const xmlContent = this.formatRulesToXML(rules);
+    console.log('[DEBUG] Generated XML content length:', xmlContent.length);
+    console.log('[DEBUG] XML content preview:', xmlContent.substring(0, 500) + '...');
+
     const humanPrompt = `Analyze these AISpecRules and return validation results using the 'return_validation_results' tool.
 
 ${xmlContent}`;
+
+    console.log('[DEBUG] Human prompt length:', humanPrompt.length);
 
     const completionParams: any = {
       model: modelName,
@@ -304,19 +330,77 @@ ${xmlContent}`;
       completionParams.temperature = temperature;
     }
 
+    console.log('[DEBUG] Completion params:', JSON.stringify(completionParams, null, 2));
+
+    console.log('[DEBUG] Calling OpenAI API...');
     const completion = await openai.chat.completions.create(completionParams);
+    console.log('[DEBUG] Received completion response');
+
+    console.log('[DEBUG] Completion choices length:', completion.choices.length);
+    console.log('[DEBUG] First choice:', {
+      finishReason: completion.choices[0]?.finish_reason,
+      message: completion.choices[0]?.message ? {
+        role: completion.choices[0].message.role,
+        content: completion.choices[0].message.content,
+        toolCalls: completion.choices[0].message.tool_calls?.map(tc => ({
+          id: tc.id,
+          type: tc.type,
+          functionName: tc.function.name,
+          functionArgs: tc.function.arguments
+        }))
+      } : null
+    });
 
     const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
 
-    if (!toolCall || toolCall.function.name !== 'return_validation_results') {
+    if (!toolCall) {
+      console.log('[DEBUG] No tool call found in completion');
+      throw new Error("No tool call found or unexpected tool called from AI.");
+    }
+
+    console.log('[DEBUG] Tool call details:', {
+      id: toolCall.id,
+      type: toolCall.type,
+      functionName: toolCall.function.name,
+      functionArgs: toolCall.function.arguments
+    });
+
+    if (toolCall.function.name !== 'return_validation_results') {
+      console.log('[DEBUG] Unexpected tool function name:', toolCall.function.name);
       throw new Error("No tool call found or unexpected tool called from AI.");
     }
 
     const rawResponse = toolCall.function.arguments;
+    console.log('[DEBUG] Raw response from AI:', rawResponse);
+    
     if (!rawResponse) {
+      console.log('[DEBUG] No response content from AI');
       throw new Error("No response content from AI.");
     }
 
-    return outputSchema.parse(JSON.parse(rawResponse).results) as AISpecValidationResult;
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(rawResponse);
+      console.log('[DEBUG] Parsed JSON response:', JSON.stringify(parsedResponse, null, 2));
+    } catch (error) {
+      console.log('[DEBUG] Failed to parse JSON response:', error);
+      throw new Error(`Failed to parse AI response as JSON: ${error}`);
+    }
+
+    console.log('[DEBUG] Results object from parsed response:', parsedResponse.results);
+    console.log('[DEBUG] Results object type:', typeof parsedResponse.results);
+    console.log('[DEBUG] Results object keys:', parsedResponse.results ? Object.keys(parsedResponse.results) : 'undefined');
+
+    let validationResult;
+    try {
+      validationResult = outputSchema.parse(parsedResponse.results) as AISpecValidationResult;
+      console.log('[DEBUG] Schema validation successful:', validationResult);
+    } catch (error) {
+      console.log('[DEBUG] Schema validation failed:', error);
+      console.log('[DEBUG] Error details:', JSON.stringify(error, null, 2));
+      throw error;
+    }
+
+    return validationResult;
   }
 }

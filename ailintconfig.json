@@ -1,0 +1,6 @@
+{
+	"baseConfig": "default",
+	"ignore": [
+		"*.spec.ts"
+	]
+}

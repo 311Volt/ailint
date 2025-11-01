@@ -1,6 +1,0 @@
-{
-  "baseConfig": "default",
-  "ignore": [
-    "**/*.test.ts"
-  ]
-}
