@@ -3,12 +3,31 @@
 import { Command } from 'commander';
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DirectoryScanner } from './directory-scanner.js';
 import { AISpecBlockParser } from './ai-spec-block-parser.js';
 import { SendRulesToAI } from './send-rules-to-ai.js';
+import { Cache } from './cache.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Load environment variables (local overrides take precedence)
 config({ path: ['.env', '.local.env'], override: true, quiet: true });
+
+// Load package version
+async function getPackageVersion(): Promise<string> {
+  try {
+    const packagePath = join(__dirname, '..', 'package.json');
+    const packageContent = await readFile(packagePath, 'utf-8');
+    const packageJson = JSON.parse(packageContent);
+    return packageJson.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
 
 const program = new Command();
 
@@ -21,6 +40,8 @@ program
   .option('-o, --output-format <format>', 'Output format (pretty or json)', 'pretty')
   .option('-v, --verbose', 'Verbose output')
   .option('--dry-run <mode>', 'Dry run mode (files or rules) - shows what would be processed without making AI calls')
+  .option('--no-cache', 'Disable caching of rule check results')
+  .option('--cache-dir <path>', 'Directory to store cache files', './.ai-lint-cache')
   .action(async (folder: string, options) => {
     try {
       if (options.verbose) {
@@ -101,10 +122,26 @@ program
       // Load API config for the target directory
       const apiConfig = await scanner.loadApiConfigForDirectory(resolve(folder));
       
+      // Initialize cache
+      const packageVersion = await getPackageVersion();
+      const cache = new Cache({
+        enabled: options.cache !== false, // --no-cache sets this to false
+        cacheDir: resolve(options.cacheDir),
+      }, packageVersion);
+
+      if (options.verbose) {
+        if (options.cache !== false) {
+          console.log(`Cache enabled: ${resolve(options.cacheDir)}`);
+        } else {
+          console.log('Cache disabled');
+        }
+      }
+      
       const aiService = new SendRulesToAI({
         apiConfig: apiConfig || undefined,
         maxChunkSize: parseInt(options.chunkSize, 10),
         directoryScanner: scanner,
+        cache,
       });
 
       // Validate rules with AI

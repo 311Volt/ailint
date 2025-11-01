@@ -105,6 +105,8 @@ ailint <folder> [options]
 - `-o, --output-format <format>` - Output format: `pretty` or `json` (default: `pretty`)
 - `-v, --verbose` - Verbose output
 - `--dry-run <mode>` - Dry run mode: `files` or `rules`
+- `--no-cache` - Disable caching of rule check results
+- `--cache-dir <path>` - Directory to store cache files (default: `./.ai-lint-cache`)
 
 
 

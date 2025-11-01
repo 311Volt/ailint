@@ -4,12 +4,14 @@ import { XMLBuilder } from 'fast-xml-parser';
 import type { AISpecRule, AISpecValidationResult } from './interfaces/ai-spec-rule.js';
 import type { ApiConfig } from './interfaces/ailintconfig.js';
 import type { DirectoryScanner } from './directory-scanner.js';
+import type { Cache } from './cache.js';
 
 export interface AIServiceConfig {
   apiConfig?: ApiConfig;
   maxChunkSize?: number;
   onProgress?: (current: number, total: number) => void;
   directoryScanner?: DirectoryScanner;
+  cache?: Cache;
 }
 
 export class SendRulesToAI {
@@ -17,11 +19,13 @@ export class SendRulesToAI {
   private readonly systemPrompt: string;
   private readonly directoryScanner: DirectoryScanner | undefined;
   private readonly fallbackApiConfig: ApiConfig | undefined;
+  private readonly cache: Cache | undefined;
 
   constructor(config: AIServiceConfig = {}) {
     this.maxChunkSize = config.maxChunkSize || 150000;
     this.directoryScanner = config.directoryScanner;
     this.fallbackApiConfig = config.apiConfig;
+    this.cache = config.cache;
 
     this.systemPrompt = `You are a code verification assistant. You will receive AISpecRule objects in XML format.
 
@@ -37,7 +41,7 @@ Your task is to check whether the source code in each block matches its specific
 
 For each rule, you must return a result with:
 - result: Either "PASS" if ALL blocks' source code correctly implements their specifications, or "FAIL" if ANY block's source code does not match its specification
-- reason: If result is "FAIL", provide a concise explanation (max 3 sentences). If result is "PASS", set reason to null.
+- reason: If result is "FAIL", provide a concise explanation. If result is "PASS", set reason to null.
 
 Consider the entire rule context when evaluating individual blocks.
 
@@ -263,7 +267,54 @@ You must return a JSON object with results for each rule name specified in the s
   }
 
   private async processChunk(rules: AISpecRule[], apiConfig: ApiConfig): Promise<AISpecValidationResult> {
+    const results: AISpecValidationResult = {};
+    const rulesToProcess: AISpecRule[] = [];
 
+    // Check cache for each rule
+    if (this.cache) {
+      for (const rule of rules) {
+        const cached = await this.cache.get(apiConfig, rule);
+        if (cached) {
+          // Use cached result
+          results[rule.name] = {
+            result: cached.result,
+            reason: cached.reason || undefined,
+          };
+        } else {
+          // Need to process this rule
+          rulesToProcess.push(rule);
+        }
+      }
+    } else {
+      // No cache, process all rules
+      rulesToProcess.push(...rules);
+    }
+
+    // If all rules were cached, return early
+    if (rulesToProcess.length === 0) {
+      return results;
+    }
+
+    // Process uncached rules with AI
+    const aiResults = await this.callAI(rulesToProcess, apiConfig);
+
+    // Store results in cache and merge with cached results
+    if (this.cache) {
+      for (const rule of rulesToProcess) {
+        const result = aiResults[rule.name];
+        if (result) {
+          await this.cache.set(apiConfig, rule, result.result, result.reason || null);
+        }
+      }
+    }
+
+    // Merge AI results with cached results
+    Object.assign(results, aiResults);
+
+    return results;
+  }
+
+  private async callAI(rules: AISpecRule[], apiConfig: ApiConfig): Promise<AISpecValidationResult> {
     // Create OpenAI client with the provided config
     const openai = new OpenAI({
       apiKey: apiConfig.apiKey,
