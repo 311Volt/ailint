@@ -20,7 +20,7 @@ const mockIgnore = mock(() => mockIgnoreInstance);
 
 // Mock ConfigLoader
 const mockConfigLoader = {
-  loadConfigWithExpandedApiConfig: mock(() => Promise.resolve(null)),
+  loadConfigWithExpandedApiConfig: mock(() => Promise.resolve(null) as Promise<AilintConfig | null>),
   loadBaseConfig: mock(() => Promise.resolve({})),
   clearCache: mock(() => {}),
 };
