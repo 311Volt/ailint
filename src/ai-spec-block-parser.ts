@@ -10,7 +10,7 @@ export class AISpecBlockParser {
     const lines = content.split('\n');
     
     const rules = new Map<string, AISpecRule>();
-    let currentRule: string | null = null;
+    let currentRuleNames: string[] | null = null;
     let currentBlock: AISpecBlock | null = null;
     let blockStartLine = 0;
 
@@ -21,16 +21,20 @@ export class AISpecBlockParser {
       // Check for AI_SPEC_BEGIN
       const beginMatch = line.match(this.beginRegex);
       if (beginMatch) {
-        const ruleName = beginMatch[1]!;
+        const ruleNamesStr = beginMatch[1]!;
         const specification = beginMatch[2]!;
-        currentRule = ruleName;
+        // Split rule names by comma and trim whitespace
+        currentRuleNames = ruleNamesStr.split(',').map(name => name.trim());
         blockStartLine = i + 1; // +1 for 1-based line numbers
         
-        if (!rules.has(ruleName)) {
-          rules.set(ruleName, {
-            name: ruleName,
-            blocks: []
-          });
+        // Initialize rules if they don't exist
+        for (const ruleName of currentRuleNames) {
+          if (!rules.has(ruleName)) {
+            rules.set(ruleName, {
+              name: ruleName,
+              blocks: []
+            });
+          }
         }
         
         currentBlock = {
@@ -47,25 +51,32 @@ export class AISpecBlockParser {
       // Check for AI_SPEC_END
       const endMatch = line.match(this.endRegex);
       if (endMatch) {
-        const ruleName = endMatch[1]!;
+        const ruleNamesStr = endMatch[1]!;
+        // Split rule names by comma and trim whitespace
+        const endRuleNames = ruleNamesStr.split(',').map(name => name.trim());
         
-        if (currentRule === ruleName && currentBlock) {
+        if (currentRuleNames && currentBlock && 
+            currentRuleNames.length === endRuleNames.length &&
+            currentRuleNames.every((name, index) => name === endRuleNames[index])) {
           currentBlock.endLine = i + 1; // +1 for 1-based line numbers
           currentBlock.source = currentBlock.source.trim();
           
-          const rule = rules.get(ruleName);
-          if (rule) {
-            rule.blocks.push(currentBlock);
+          // Add the block to all rules
+          for (const ruleName of currentRuleNames) {
+            const rule = rules.get(ruleName);
+            if (rule) {
+              rule.blocks.push(currentBlock);
+            }
           }
         }
         
-        currentRule = null;
+        currentRuleNames = null;
         currentBlock = null;
         continue;
       }
       
       // If we're inside a block, collect the source code
-      if (currentBlock && currentRule) {
+      if (currentBlock && currentRuleNames) {
         currentBlock.source += line + '\n';
       }
     }

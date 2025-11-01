@@ -494,6 +494,96 @@ Uses all defaults plus Vue and Svelte files, and ignores coverage, tmp directori
 }
 ```
 
+## AI_SPEC Block Syntax
+
+### Basic Syntax
+
+AI_SPEC blocks are defined using comment markers that contain the `AI_SPEC_BEGIN` and `AI_SPEC_END` tags:
+
+```
+<comment> AI_SPEC_BEGIN(rule_name): "specification" </comment>
+... code ...
+<comment> AI_SPEC_END(rule_name) </comment>
+```
+
+Where `<comment>` can be:
+- `//` for single-line comments (JavaScript, TypeScript, Java, C++, etc.)
+- `<!-- -->` for XML comments (HTML, XML, Markdown, etc.)
+- `#` for hash comments (Python, Shell, etc.)
+- Other language-specific comment syntax
+
+### Single Rule Per Block
+
+A block can belong to a single rule:
+
+```javascript
+// AI_SPEC_BEGIN(my_rule): "specification text for the rule"
+function implementation() {
+  // ... code that satisfies the specification
+}
+// AI_SPEC_END(my_rule)
+```
+
+### Multiple Rules Per Block
+
+A block can belong to multiple rules at once by comma-separating rule names:
+
+```javascript
+// AI_SPEC_BEGIN(rule1, rule2, rule3): "specification"
+function implementation() {
+  // ... code that satisfies all three rules
+}
+// AI_SPEC_END(rule1, rule2, rule3)
+```
+
+**Important:** The rule names in `AI_SPEC_BEGIN` and `AI_SPEC_END` must match exactly:
+- Same number of rules
+- Same rule names in the same order
+- Whitespace around rule names is trimmed, so `(rule1, rule2)` and `(rule1,rule2)` are equivalent
+
+Invalid examples:
+
+```javascript
+// ❌ Mismatched rule names
+// AI_SPEC_BEGIN(rule1, rule2): "spec"
+code
+// AI_SPEC_END(rule1, rule3)  // rule3 doesn't match rule2
+
+// ❌ Different number of rules
+// AI_SPEC_BEGIN(rule1, rule2): "spec"
+code
+// AI_SPEC_END(rule1)  // missing rule2
+
+// ❌ Different order
+// AI_SPEC_BEGIN(rule1, rule2): "spec"
+code
+// AI_SPEC_END(rule2, rule1)  // order doesn't match
+```
+
+### Multiple Blocks Per Rule
+
+A single rule can have multiple blocks across different files:
+
+```javascript
+// file1.ts
+// AI_SPEC_BEGIN(api_validation): "validates input parameters"
+export function validateInput(data: unknown) {
+  // ... validation logic
+}
+// AI_SPEC_END(api_validation)
+```
+
+```javascript
+// file2.ts
+// AI_SPEC_BEGIN(api_validation): "returns appropriate error responses"
+export function handleError(error: Error) {
+  // ... error handling
+}
+// AI_SPEC_END(api_validation)
+```
+
+The AI will check both blocks together when validating the `api_validation` rule.
+
 ## Dry Run Mode
 
 Use dry run mode to preview what `ailint` will scan without making actual AI API calls.

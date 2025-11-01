@@ -1,6 +1,6 @@
 {
   "name": "@x311volt/ailint",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "CLI tool to validate AI specification rules in code",
   "module": "src/index.ts",
   "type": "module",

@@ -291,4 +291,113 @@ const a = 1;
       expect(source).not.toEndWith("\n\n");
     });
   });
+
+  describe("parseFile - multiple rules per block", () => {
+    test("recognizes a block belonging to multiple rules", async () => {
+      const fileContent = `
+// AI_SPEC_BEGIN(rule1, rule2): "shared specification"
+function sharedCode() {
+  return 42;
+}
+// AI_SPEC_END(rule1, rule2)
+`;
+      mockReadFile.mockResolvedValue(fileContent);
+
+      const rules = await parser.parseFile("test.ts");
+
+      expect(rules).toHaveLength(2);
+      const ruleNames = rules.map(r => r.name).sort();
+      expect(ruleNames).toEqual(["rule1", "rule2"]);
+      
+      // Both rules should have the same block
+      expect(rules[0]!.blocks).toHaveLength(1);
+      expect(rules[1]!.blocks).toHaveLength(1);
+      expect(rules[0]!.blocks[0]!.specification).toBe("shared specification");
+      expect(rules[1]!.blocks[0]!.specification).toBe("shared specification");
+      expect(rules[0]!.blocks[0]!.source).toBe(rules[1]!.blocks[0]!.source);
+    });
+
+    test("recognizes multiple rules with varied spacing", async () => {
+      const fileContent = `
+// AI_SPEC_BEGIN(rule_a , rule_b , rule_c): "specification"
+const x = 1;
+// AI_SPEC_END(rule_a, rule_b, rule_c)
+`;
+      mockReadFile.mockResolvedValue(fileContent);
+
+      const rules = await parser.parseFile("test.ts");
+
+      expect(rules).toHaveLength(3);
+      const ruleNames = rules.map(r => r.name).sort();
+      expect(ruleNames).toEqual(["rule_a", "rule_b", "rule_c"]);
+    });
+
+    test("rejects mismatched rule names in BEGIN and END", async () => {
+      const fileContent = `
+// AI_SPEC_BEGIN(rule1, rule2): "test"
+const a = 1;
+// AI_SPEC_END(rule1, rule3)
+`;
+      mockReadFile.mockResolvedValue(fileContent);
+
+      const rules = await parser.parseFile("test.ts");
+
+      // Should not create blocks since rule names don't match
+      expect(rules).toHaveLength(0);
+    });
+
+    test("rejects if END has different number of rules", async () => {
+      const fileContent = `
+// AI_SPEC_BEGIN(rule1, rule2): "test"
+const a = 1;
+// AI_SPEC_END(rule1)
+`;
+      mockReadFile.mockResolvedValue(fileContent);
+
+      const rules = await parser.parseFile("test.ts");
+
+      // Should not create blocks since rule count doesn't match
+      expect(rules).toHaveLength(0);
+    });
+
+    test("combines blocks from multiple rules when specified", async () => {
+      const fileContent = `
+// AI_SPEC_BEGIN(shared): "first block"
+const a = 1;
+// AI_SPEC_END(shared)
+
+// AI_SPEC_BEGIN(shared, other): "second block"
+const b = 2;
+// AI_SPEC_END(shared, other)
+`;
+      mockReadFile.mockResolvedValue(fileContent);
+
+      const rules = await parser.parseFile("test.ts");
+
+      expect(rules).toHaveLength(2);
+      const shared = rules.find(r => r.name === "shared");
+      const other = rules.find(r => r.name === "other");
+      
+      expect(shared!.blocks).toHaveLength(2);
+      expect(other!.blocks).toHaveLength(1);
+      expect(shared!.blocks[0]!.specification).toBe("first block");
+      expect(shared!.blocks[1]!.specification).toBe("second block");
+      expect(other!.blocks[0]!.specification).toBe("second block");
+    });
+
+    test("handles XML comments with multiple rules", async () => {
+      const fileContent = `
+<!-- AI_SPEC_BEGIN(rule1, rule2): "XML multi-rule specification" -->
+<div>content</div>
+<!-- AI_SPEC_END(rule1, rule2) -->
+`;
+      mockReadFile.mockResolvedValue(fileContent);
+
+      const rules = await parser.parseFile("test.html");
+
+      expect(rules).toHaveLength(2);
+      expect(rules.map(r => r.name).sort()).toEqual(["rule1", "rule2"]);
+      expect(rules[0]!.blocks[0]!.specification).toBe("XML multi-rule specification");
+    });
+  });
 });
