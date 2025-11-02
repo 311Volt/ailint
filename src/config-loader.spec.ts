@@ -93,6 +93,23 @@ describe("ConfigLoader", () => {
       );
     });
 
+    test("defaults to 'parent' when baseConfig is omitted", async () => {
+      const customConfig: AilintConfig = {
+        includeExtensions: [".ts"],
+      };
+
+      // First call loads custom config, then subsequent calls should reject to simulate no parent
+      mockReadFile
+        .mockResolvedValueOnce(JSON.stringify(customConfig))
+        .mockRejectedValue(new Error("ENOENT: no such file or directory"));
+
+      // This will fail because it tries to find a parent config
+      // We'll just verify the error message indicates 'parent' was used
+      await expect(loader.loadConfig("test.json")).rejects.toThrow(
+        "No parent configuration found"
+      );
+    });
+
     test("throws error for malformed JSON", async () => {
       mockReadFile.mockResolvedValue("{ invalid json }");
 

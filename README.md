@@ -132,6 +132,11 @@ ailint:
     # - bun install -g @x311volt/ailint
   script:
     - ailint .
+  cache:
+    key: ailint-cache
+    paths:
+      - .ai-lint-cache/
+    policy: pull-push
   variables:
     OPENAI_BASE_URL: "${OPENAI_BASE_URL}"
     OPENAI_MODEL: "${OPENAI_MODEL}"
@@ -215,7 +220,7 @@ You can have different API configurations for different subdirectories:
 ```json
 // src/frontend/ailintconfig.json
 {
-  "baseConfig": "default",
+  "baseConfig": "parent",
   "apiConfig": {
     "baseUrl": "${OPENAI_BASE_URL:-https://api.openai.com/v1}",
     "modelName": "${FRONTEND_MODEL:-gpt-4}",
@@ -228,7 +233,7 @@ You can have different API configurations for different subdirectories:
 ```json
 // src/backend/ailintconfig.json
 {
-  "baseConfig": "default", 
+  "baseConfig": "parent", 
   "apiConfig": {
     "baseUrl": "${OPENAI_BASE_URL:-https://api.openai.com/v1}",
     "modelName": "${BACKEND_MODEL:-gpt-5-nano}",
@@ -368,9 +373,13 @@ To fix such errors:
 
 #### Fields
 
-- **`baseConfig`** (required): Either `"empty"` or `"default"`
+- **`baseConfig`** (optional): Either `"empty"`, `"default"`, or `"parent"` (default: `"parent"`)
   - `"empty"`: Start with no default file patterns
-  - `"default"`: Extend the built-in default configuration (recommended)
+  - `"default"`: Extend the built-in default configuration
+  - `"parent"`: Inherit configuration from parent directory's ailintconfig.json (implicit default)
+    - When omitted, `"parent"` is automatically used
+    - Walks up the directory tree to find a parent config with `baseConfig` set to `"empty"` or `"default"`
+    - Throws an error if no parent config with a valid base is found in the hierarchy
 
 - **`includeExtensions`** (optional): Array of file extensions to include
   - Extensions are appended to base config if `baseConfig` is `"default"`

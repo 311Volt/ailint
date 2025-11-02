@@ -10,6 +10,7 @@ const __dirname = dirname(__filename);
 
 export class ConfigLoader {
   private configCache = new Map<string, AilintConfig>();
+  private directoryConfigCache = new Map<string, { config: AilintConfig; filePath: string } | null>();
   private baseConfigPath: string;
 
   constructor(baseConfigPath?: string) {
@@ -26,9 +27,14 @@ export class ConfigLoader {
       const content = await readFile(configPath, 'utf-8');
       const config = JSON.parse(content) as AilintConfig;
       
+      // Default to 'parent' if baseConfig is not specified
+      if (!config.baseConfig) {
+        config.baseConfig = 'parent';
+      }
+
       // Validate baseConfig
-      if (config.baseConfig !== 'empty' && config.baseConfig !== 'default') {
-        throw new Error(`Invalid baseConfig value: ${config.baseConfig}. Must be 'empty' or 'default'.`);
+      if (config.baseConfig !== 'empty' && config.baseConfig !== 'default' && config.baseConfig !== 'parent') {
+        throw new Error(`Invalid baseConfig value: ${config.baseConfig}. Must be 'empty', 'default', or 'parent'.`);
       }
 
       // Validate apiConfigRuleOverrides patterns
@@ -36,7 +42,7 @@ export class ConfigLoader {
         this.validateRulePatterns(config.apiConfigRuleOverrides, configPath);
       }
 
-      const mergedConfig = await this.mergeWithBase(config);
+      const mergedConfig = await this.mergeWithBase(config, dirname(configPath));
       this.configCache.set(configPath, mergedConfig);
       return mergedConfig;
     } catch (error) {
@@ -98,7 +104,7 @@ export class ConfigLoader {
     }
   }
 
-  private async mergeWithBase(config: AilintConfig): Promise<AilintConfig> {
+  private async mergeWithBase(config: AilintConfig, configDir: string): Promise<AilintConfig> {
     if (config.baseConfig === 'empty') {
       // Return config as-is, with empty arrays for undefined fields
       return {
@@ -112,6 +118,39 @@ export class ConfigLoader {
       };
     }
 
+    if (config.baseConfig === 'parent') {
+      // Load parent directory's config and merge with it
+      const parentConfig = await this.findParentConfig(configDir);
+      if (!parentConfig) {
+        throw new Error(
+          `No parent configuration found for directory "${configDir}". ` +
+          `When using baseConfig: "parent", there must be a parent ailintconfig.json ` +
+          `with baseConfig set to "empty" or "default" somewhere in the directory hierarchy.`
+        );
+      }
+
+      // Merge current config with parent config
+      return {
+        baseConfig: parentConfig.baseConfig,
+        includeExtensions: [
+          ...(parentConfig.includeExtensions || []),
+          ...(config.includeExtensions || []),
+        ],
+        includeMimeTypes: [
+          ...(parentConfig.includeMimeTypes || []),
+          ...(config.includeMimeTypes || []),
+        ],
+        ignore: [
+          ...(parentConfig.ignore || []),
+          ...(config.ignore || []),
+        ],
+        useGitIgnore: config.useGitIgnore ?? parentConfig.useGitIgnore,
+        apiConfig: config.apiConfig || parentConfig.apiConfig,
+        apiConfigRuleOverrides: config.apiConfigRuleOverrides || parentConfig.apiConfigRuleOverrides,
+      };
+    }
+
+    // baseConfig === 'default'
     // Load base config and merge
     const baseConfig = await this.loadBaseConfig();
     
@@ -133,6 +172,83 @@ export class ConfigLoader {
       apiConfig: config.apiConfig || baseConfig.apiConfig,
       apiConfigRuleOverrides: config.apiConfigRuleOverrides || baseConfig.apiConfigRuleOverrides,
     };
+  }
+
+  private async findParentConfig(startDir: string): Promise<AilintConfig | null> {
+    // Check cache first
+    if (this.directoryConfigCache.has(startDir)) {
+      const cached = this.directoryConfigCache.get(startDir);
+      return cached ? cached.config : null;
+    }
+
+    let currentDir = dirname(startDir);
+
+    while (true) {
+      // Check cache for this directory
+      if (this.directoryConfigCache.has(currentDir)) {
+        const cached = this.directoryConfigCache.get(currentDir);
+        const result = cached ? cached.config : null;
+        // Cache the result for the original start directory too
+        this.directoryConfigCache.set(startDir, cached);
+        return result;
+      }
+
+      const configPath = join(currentDir, 'ailintconfig.json');
+
+      try {
+        // Try to load config from this directory
+        const content = await readFile(configPath, 'utf-8');
+        const config = JSON.parse(content) as AilintConfig;
+
+        // Default to 'parent' if not specified
+        if (!config.baseConfig) {
+          config.baseConfig = 'parent';
+        }
+
+        // Validate baseConfig
+        if (config.baseConfig !== 'empty' && config.baseConfig !== 'default' && config.baseConfig !== 'parent') {
+          throw new Error(`Invalid baseConfig value: ${config.baseConfig}. Must be 'empty', 'default', or 'parent'.`);
+        }
+
+        // Validate apiConfigRuleOverrides patterns
+        if (config.apiConfigRuleOverrides) {
+          this.validateRulePatterns(config.apiConfigRuleOverrides, configPath);
+        }
+
+        // Recursively merge if this config also uses 'parent'
+        let resolvedConfig: AilintConfig;
+        if (config.baseConfig === 'parent') {
+          resolvedConfig = await this.mergeWithBase(config, currentDir);
+        } else {
+          resolvedConfig = await this.mergeWithBase(config, currentDir);
+        }
+
+        // Cache the result
+        this.directoryConfigCache.set(currentDir, { config: resolvedConfig, filePath: configPath });
+        this.directoryConfigCache.set(startDir, { config: resolvedConfig, filePath: configPath });
+        return resolvedConfig;
+      } catch (error) {
+        // Config doesn't exist in this directory, continue to parent
+        if (!(error instanceof Error) || !error.message.includes('ENOENT')) {
+          // If it's not a "file not found" error, it might be a validation error - throw it
+          if (error instanceof Error && error.message.includes('Invalid baseConfig')) {
+            throw error;
+          }
+        }
+      }
+
+      // Move to parent directory
+      const parentDir = dirname(currentDir);
+
+      // If we've reached the root, stop and return null
+      if (parentDir === currentDir) {
+        // Cache null result to avoid repeated walks
+        this.directoryConfigCache.set(startDir, null);
+        return null;
+      }
+
+      currentDir = parentDir;
+    }
   }
 
   private expandApiConfig(apiConfig: any): any {
@@ -173,5 +289,6 @@ export class ConfigLoader {
 
   clearCache(): void {
     this.configCache.clear();
+    this.directoryConfigCache.clear();
   }
 }

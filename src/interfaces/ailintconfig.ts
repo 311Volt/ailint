@@ -6,7 +6,7 @@ export interface ApiConfig {
 }
 
 export interface AilintConfig {
-  baseConfig: 'empty' | 'default';
+  baseConfig?: 'empty' | 'default' | 'parent';
   includeExtensions?: string[];
   includeMimeTypes?: string[];
   ignore?: string[];
